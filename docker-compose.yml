@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  padic-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: padic-transformers:latest
+    container_name: padic-transformers-dev
+
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Mount project directory
+    volumes:
+      - .:/workspace/padic-transformers
+      - ./datasets:/workspace/padic-transformers/datasets
+      - ./checkpoints:/workspace/padic-transformers/checkpoints
+      - ./results:/workspace/padic-transformers/results
+
+    # Expose ports
+    ports:
+      - "8888:8888"  # Jupyter
+      - "6006:6006"  # TensorBoard
+      - "8080:8080"  # Additional services
+
+    # Environment variables
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7  # Adjust based on available GPUs
+      - WANDB_API_KEY=${WANDB_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
+      - PYTHONPATH=/workspace/padic-transformers/src
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # Shared memory size (important for DataLoader workers)
+    shm_size: '32gb'
+
+    # Network mode
+    network_mode: "host"
+
+    # Restart policy
+    restart: unless-stopped

@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Datasets (too large for build context)
+datasets/
+*.bin
+*.idx
+*.parquet
+*.arrow
+
+# Model checkpoints
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# Results and logs
+results/
+logs/
+wandb/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+*.md
+docs/
+
+# OS
+.DS_Store
+Thumbs.db
