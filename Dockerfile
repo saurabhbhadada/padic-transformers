@@ -46,8 +46,8 @@ RUN pip3 install \
     sentencepiece \
     safetensors
 
-# Install p-adic mathematics libraries
-RUN pip3 install cypari2 sympy mpmath
+# Install mathematics libraries (cypari2 removed - not needed for current implementation)
+RUN pip3 install sympy mpmath
 
 # Install evaluation frameworks
 RUN pip3 install \
