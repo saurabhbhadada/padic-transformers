@@ -1,6 +1,6 @@
 # P-adic Transformers Development Environment
-# Using CUDA 12.4 (compatible with driver 580.x / CUDA 13.0)
-FROM nvidia/cuda:12.4.0-cudnn-devel-ubuntu22.04
+# Using CUDA 12.1 (compatible with driver 580.x / CUDA 13.0)
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
