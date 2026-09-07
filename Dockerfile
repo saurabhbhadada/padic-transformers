@@ -1,5 +1,6 @@
 # P-adic Transformers Development Environment
-FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
+# Using CUDA 12.6 (compatible with driver 580.x / CUDA 13.0)
+FROM nvidia/cuda:12.6.0-cudnn9-devel-ubuntu22.04
 
 # Prevent interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -25,11 +26,11 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip
 RUN pip3 install --upgrade pip setuptools wheel
 
-# Install PyTorch with CUDA 12.1 support
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Install PyTorch with CUDA 12.6 support (use cu124 which is latest stable)
+RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# Install JAX with CUDA support
-RUN pip3 install "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# Install JAX with CUDA 12 support
+RUN pip3 install "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
 # Install Triton for custom kernels
 RUN pip3 install triton
