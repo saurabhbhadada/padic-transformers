@@ -8,13 +8,13 @@ services:
     image: padic-transformers:latest
     container_name: padic-transformers-dev
 
-    # GPU configuration
+    # GPU configuration - only GPUs 5 and 6
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ['0', '1']
               capabilities: [gpu]
 
     # Mount project directory
@@ -31,8 +31,8 @@ services:
       - "8080:8080"  # Additional services
 
     # Environment variables
+    # Note: CUDA_VISIBLE_DEVICES removed - set it per run instead
     environment:
-      - CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7  # Adjust based on available GPUs
       - WANDB_API_KEY=${WANDB_API_KEY}
       - HF_TOKEN=${HF_TOKEN}
       - PYTHONPATH=/workspace/padic-transformers/src
