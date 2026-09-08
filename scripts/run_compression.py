@@ -168,9 +168,23 @@ def compute_perplexity_with_compression(
             # Simulate KV-cache compression (after generation)
             # In real implementation, this happens inside attention
             if hasattr(outputs, 'past_key_values') and outputs.past_key_values is not None:
-                # Get first layer's cache as example
-                layer_cache = outputs.past_key_values[0]
-                keys, values = layer_cache[0], layer_cache[1]
+                # Handle both tuple and DynamicCache formats
+                try:
+                    # Try DynamicCache format (newer transformers)
+                    if hasattr(outputs.past_key_values, 'key_cache'):
+                        keys = outputs.past_key_values.key_cache[0]  # First layer
+                        values = outputs.past_key_values.value_cache[0]
+                    else:
+                        # Fallback to tuple format (older transformers)
+                        layer_cache = outputs.past_key_values[0]
+                        keys, values = layer_cache[0], layer_cache[1]
+                except (TypeError, IndexError, AttributeError):
+                    # Skip if cache format is incompatible
+                    keys = None
+                    values = None
+
+                if keys is None or values is None:
+                    continue
 
                 # Measure compression
                 t0 = time.time()
