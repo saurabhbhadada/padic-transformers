@@ -14,7 +14,7 @@ sys.path.insert(0, '/workspace/padic-transformers')
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.kernels import CacheCompressionConfig
+from src.kernels import CacheCompressionConfig, CompressedCache
 from src.models import apply_compression_to_model
 
 
@@ -49,23 +49,30 @@ def test_compression():
     print(f"  Sample logit: {logits_baseline[0, 0, 0].item():.4f}")
 
     # Apply compression
-    print("\n3. Applying compression...")
+    print("\n3. Creating compressed cache...")
     compression_config = CacheCompressionConfig(
         strategy='simple_2x',
         uniform_precision=8
     )
 
-    model = apply_compression_to_model(model, compression_config)
+    model, compressed_cache = apply_compression_to_model(model, compression_config)
 
     # Test compressed inference
     print("\n4. Testing compressed inference...")
     with torch.no_grad():
-        outputs_compressed = model(**inputs)
+        outputs_compressed = model(**inputs, past_key_values=compressed_cache)
         logits_compressed = outputs_compressed.logits
 
     print(f"✓ Compressed inference successful")
     print(f"  Output shape: {logits_compressed.shape}")
     print(f"  Sample logit: {logits_compressed[0, 0, 0].item():.4f}")
+
+    # Check cache stats
+    print("\n4b. Cache memory footprint...")
+    cache_stats = compressed_cache.get_memory_footprint()
+    print(f"  Compressed: {cache_stats['compressed_mb']:.2f} MB")
+    print(f"  Uncompressed: {cache_stats['uncompressed_mb']:.2f} MB")
+    print(f"  Compression ratio: {cache_stats['compression_ratio']:.2f}x")
 
     # Compare outputs
     print("\n5. Comparing outputs...")

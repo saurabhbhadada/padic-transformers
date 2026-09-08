@@ -20,6 +20,8 @@ from .kv_cache_compression import (
     decompress_kv_cache_simple,
 )
 
+from .compressed_cache import CompressedCache
+
 __all__ = [
     # Core ops
     'float_to_2adic',
@@ -37,4 +39,5 @@ __all__ = [
     'CacheCompressionConfig',
     'compress_kv_cache_simple',
     'decompress_kv_cache_simple',
+    'CompressedCache',
 ]

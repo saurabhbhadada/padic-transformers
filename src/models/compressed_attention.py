@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 import sys
 sys.path.insert(0, '/workspace/padic-transformers')
 
-from src.kernels import float_to_2adic, _2adic_to_float, CacheCompressionConfig
+from src.kernels import float_to_2adic, _2adic_to_float, CacheCompressionConfig, CompressedCache
 from transformers.models.gpt_neox.modeling_gpt_neox import (
     apply_rotary_pos_emb,
     ALL_ATTENTION_FUNCTIONS,
@@ -56,31 +56,15 @@ def create_compressed_attention_forward(compression_config: CacheCompressionConf
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-        # 3. Update cache if needed
+        # 3. Update cache (CompressedCache handles compression internally)
+        # If using CompressedCache, K/V are compressed, stored as uint8, then decompressed
+        # If using standard cache, K/V pass through unchanged
         if layer_past is not None:
-            key_states, value_states = layer_past.update(key_states, value_states, self.layer_idx)
-
-        # ===== COMPRESSION HAPPENS HERE =====
-        if compression_config.strategy != 'none':
-            # Store original dtype to preserve it after decompression
             original_dtype = key_states.dtype
-
-            # Get precision
-            if compression_config.strategy == 'simple_2x':
-                precision = compression_config.uniform_precision
-            elif compression_config.strategy == 'adaptive':
-                precision = compression_config.medium_precision
-            else:
-                precision = 16
-
-            # Compress K and V (quantize with dynamic range)
-            key_compressed, key_scale = float_to_2adic(key_states, precision=precision)
-            value_compressed, value_scale = float_to_2adic(value_states, precision=precision)
-
-            # Decompress (introduces quantization error!)
-            key_states = _2adic_to_float(key_compressed, precision=precision, scale=key_scale).to(original_dtype)
-            value_states = _2adic_to_float(value_compressed, precision=precision, scale=value_scale).to(original_dtype)
-        # ===== END COMPRESSION =====
+            key_states, value_states = layer_past.update(key_states, value_states, self.layer_idx)
+            # Ensure dtype matches (CompressedCache returns float32, need to match query)
+            key_states = key_states.to(original_dtype)
+            value_states = value_states.to(original_dtype)
 
         # 4. Compute attention using original interface
         attention_interface = ALL_ATTENTION_FUNCTIONS.get_interface(
@@ -107,73 +91,55 @@ def create_compressed_attention_forward(compression_config: CacheCompressionConf
     return compressed_forward
 
 
-def apply_compression_to_model(model, compression_config: CacheCompressionConfig):
+def create_compressed_cache(compression_config: CacheCompressionConfig):
     """
-    Apply K/V compression to all GPTNeoXAttention layers.
+    Create a CompressedCache for KV cache compression.
 
-    This replaces the forward method of each attention layer to:
-    1. Compute Q, K, V normally
-    2. Apply rotary embeddings
-    3. Compress K and V to 2-adic representation
-    4. Decompress (with quantization loss)
-    5. Use lossy K/V in attention computation
+    This cache stores K/V in compressed format (uint8) instead of float16,
+    achieving 2x memory reduction.
 
     Args:
-        model: HuggingFace GPT-NeoX model
         compression_config: Compression configuration
 
     Returns:
-        Modified model (in-place)
+        CompressedCache instance
     """
-    print(f"\nApplying {compression_config.strategy} compression to attention layers...")
-
-    # Find all GPTNeoXAttention layers
-    attention_layers = []
-    for name, module in model.named_modules():
-        if module.__class__.__name__ == 'GPTNeoXAttention':
-            attention_layers.append((name, module))
-
-    print(f"Found {len(attention_layers)} GPTNeoXAttention layers")
-
-    if len(attention_layers) == 0:
-        print("ERROR: No GPTNeoXAttention layers found!")
-        print("Model architecture:", model.__class__.__name__)
-        print("Available modules:", [n for n, _ in model.named_modules()][:10])
-        return model
-
-    # Apply compression to each layer
-    modified_count = 0
-    for layer_name, attn_module in attention_layers:
-        try:
-            # Verify required attributes exist
-            required_attrs = ['query_key_value', 'dense', 'head_size', 'scaling', 'config']
-            if not all(hasattr(attn_module, attr) for attr in required_attrs):
-                print(f"  Skipping {layer_name}: missing required attributes")
-                continue
-
-            # Store original forward (for potential restoration)
-            attn_module._original_forward = attn_module.forward
-
-            # Create compressed version
-            compressed_forward = create_compressed_attention_forward(compression_config)
-
-            # Replace forward method (bind to instance)
-            attn_module.forward = compressed_forward.__get__(attn_module, attn_module.__class__)
-
-            modified_count += 1
-
-        except Exception as e:
-            print(f"  Error modifying {layer_name}: {e}")
-            continue
-
-    print(f"✓ Successfully applied compression to {modified_count}/{len(attention_layers)} layers")
+    print(f"\nCreating CompressedCache with {compression_config.strategy} strategy...")
 
     if compression_config.strategy == 'simple_2x':
         print(f"  Precision: {compression_config.uniform_precision}-bit")
     elif compression_config.strategy == 'adaptive':
         print(f"  Precision: adaptive (16/8/4 bits)")
 
-    return model
+    cache = CompressedCache(compression_config)
+    print(f"✓ CompressedCache created")
+
+    return cache
+
+
+def apply_compression_to_model(model, compression_config: CacheCompressionConfig):
+    """
+    Prepare model for compressed inference.
+
+    NOTE: This function is now simplified - compression is handled by CompressedCache.
+    To use compression, create a CompressedCache and pass it via past_key_values parameter.
+
+    Args:
+        model: HuggingFace GPT-NeoX model
+        compression_config: Compression configuration
+
+    Returns:
+        tuple: (model, compressed_cache)
+    """
+    print(f"\nSetting up compression with {compression_config.strategy} strategy...")
+
+    # Create compressed cache
+    cache = create_compressed_cache(compression_config)
+
+    print(f"✓ Model ready for compressed inference")
+    print(f"  Pass the cache via: model(..., past_key_values=cache)")
+
+    return model, cache
 
 
 def remove_compression_from_model(model):

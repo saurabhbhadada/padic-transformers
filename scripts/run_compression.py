@@ -37,7 +37,7 @@ from src.models import apply_compression_to_model
 
 
 def load_model_and_tokenizer(model_name: str, cache_dir: Path, compression_config: CacheCompressionConfig):
-    """Load pretrained model and tokenizer, apply compression to attention."""
+    """Load pretrained model and tokenizer, create compressed cache."""
     print(f"\nLoading model: {model_name}")
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -57,11 +57,12 @@ def load_model_and_tokenizer(model_name: str, cache_dir: Path, compression_confi
 
     print(f"✓ Model loaded: {sum(p.numel() for p in model.parameters())/1e9:.2f}B params")
 
-    # Apply compression to attention layers
+    # Create compressed cache
+    compressed_cache = None
     if compression_config.strategy != "none":
-        model = apply_compression_to_model(model, compression_config)
+        model, compressed_cache = apply_compression_to_model(model, compression_config)
 
-    return model, tokenizer
+    return model, tokenizer, compressed_cache
 
 
 def load_eval_dataset(dataset_name: str, split: str = "test"):
@@ -112,16 +113,16 @@ def compute_perplexity_with_compression(
     dataset,
     text_key: str,
     compression_config: CacheCompressionConfig,
+    compressed_cache = None,
     context_length: int = 2048,
     stride: int = 512,
     max_samples: int = None,
 ):
     """
-    Compute perplexity with K/V compression in attention.
+    Compute perplexity with K/V cache compression.
 
-    Compression is applied in the attention layers, so we just run
-    standard perplexity evaluation. The quantization error from
-    compressed K/V will affect the perplexity.
+    Uses CompressedCache to store K/V in uint8 format, achieving 2x memory reduction.
+    The quantization error from compression affects perplexity.
     """
     model.eval()
     device = next(model.parameters()).device
@@ -150,11 +151,14 @@ def compute_perplexity_with_compression(
     print(f"Compression: {compression_config.strategy}")
 
     # Compute perplexity with sliding window
-    # Compression happens inside attention layers automatically
+    # If using CompressedCache, K/V are stored in compressed uint8 format
     nlls = []
     num_tokens = 0
 
     max_length = min(input_ids.shape[1], context_length * 10)  # Limit for memory
+
+    # Import CompressedCache for fresh cache creation
+    from src.kernels import CompressedCache
 
     with torch.no_grad():
         for begin_loc in tqdm(range(0, max_length, stride), desc="Computing perplexity"):
@@ -164,8 +168,14 @@ def compute_perplexity_with_compression(
             input_batch = input_ids[:, begin_loc:end_loc]
             target_ids = input_batch.clone()
 
-            # Forward pass - K/V compression happens in attention layers
-            outputs = model(input_batch, labels=target_ids)
+            # Create fresh cache for each window (sliding window approach)
+            if compressed_cache is not None:
+                window_cache = CompressedCache(compression_config)
+            else:
+                window_cache = None
+
+            # Forward pass with compressed cache
+            outputs = model(input_batch, labels=target_ids, past_key_values=window_cache)
             neg_log_likelihood = outputs.loss * trg_len
 
             nlls.append(neg_log_likelihood)
@@ -183,15 +193,23 @@ def compute_perplexity_with_compression(
     else:
         peak_memory_mb = 0
 
+    # Get cache memory footprint (create one final cache to measure)
+    cache_stats = {"compressed_mb": 0, "uncompressed_mb": 0, "compression_ratio": 1.0}
+    if compressed_cache is not None:
+        # Create a reference cache with full context to measure memory
+        ref_cache = CompressedCache(compression_config)
+        # Run one forward pass to populate cache
+        with torch.no_grad():
+            test_input = input_ids[:, :min(context_length, input_ids.shape[1])]
+            _ = model(test_input, past_key_values=ref_cache)
+        cache_stats = ref_cache.get_memory_footprint()
+
     # Compression ratio based on strategy
     if compression_config.strategy == "simple_2x":
-        compression_ratio = 2.0
         precision_bits = compression_config.uniform_precision
     elif compression_config.strategy == "adaptive":
-        compression_ratio = 3.5  # Approximate: mix of 16/8/4 bits
         precision_bits = "adaptive"
     else:
-        compression_ratio = 1.0
         precision_bits = 16
 
     results = {
@@ -201,7 +219,9 @@ def compute_perplexity_with_compression(
         "context_length": context_length,
         "compression_strategy": compression_config.strategy,
         "precision_bits": precision_bits,
-        "compression_ratio": compression_ratio,
+        "cache_compressed_mb": cache_stats["compressed_mb"],
+        "cache_uncompressed_mb": cache_stats["uncompressed_mb"],
+        "compression_ratio": cache_stats["compression_ratio"],
     }
 
     return results
@@ -243,7 +263,7 @@ def main():
 
     # Load model and dataset
     cache_dir = Path(args.cache_dir)
-    model, tokenizer = load_model_and_tokenizer(args.model, cache_dir, compression_config)
+    model, tokenizer, compressed_cache = load_model_and_tokenizer(args.model, cache_dir, compression_config)
     dataset, text_key = load_eval_dataset(args.dataset)
 
     # Run evaluation for each context length
@@ -269,6 +289,7 @@ def main():
             dataset=dataset,
             text_key=text_key,
             compression_config=compression_config,
+            compressed_cache=compressed_cache,
             context_length=ctx_len,
             stride=args.stride,
             max_samples=args.max_samples,
@@ -283,6 +304,7 @@ def main():
         print(f"Results for context length {ctx_len}:")
         print(f"  Perplexity: {results['perplexity']:.4f}")
         print(f"  Peak memory: {results['peak_memory_mb']:.2f} MB")
+        print(f"  Cache: {results['cache_compressed_mb']:.2f} MB (compressed) / {results['cache_uncompressed_mb']:.2f} MB (uncompressed)")
         print(f"  Compression ratio: {results['compression_ratio']:.2f}x")
         print(f"  Precision: {results['precision_bits']} bits")
         print(f"  Time: {elapsed_time:.2f}s")
@@ -304,7 +326,7 @@ def main():
     for ctx_len, results in all_results["results"].items():
         print(f"Context {ctx_len}: PPL={results['perplexity']:.4f}, "
               f"Compression={results['compression_ratio']:.2f}x, "
-              f"Memory={results['peak_memory_mb']:.2f}MB")
+              f"Cache={results['cache_compressed_mb']:.2f}MB")
     print(f"{'='*60}")
 
 

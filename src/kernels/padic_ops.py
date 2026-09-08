@@ -54,17 +54,25 @@ def float_to_2adic(x: torch.Tensor, precision: int = 8) -> Tuple[torch.Tensor, t
     # This preserves the range of K/V values in transformers
     max_val = torch.abs(x).max()
 
+    # Choose appropriate dtype based on precision
+    if precision <= 8:
+        dtype = torch.uint8
+    elif precision <= 16:
+        dtype = torch.int16
+    else:
+        dtype = torch.int32
+
     # Avoid division by zero
     if max_val == 0:
-        return torch.zeros_like(x, dtype=torch.int32), torch.tensor(1.0, device=x.device)
+        return torch.zeros_like(x, dtype=dtype), torch.tensor(1.0, device=x.device)
 
     # Scale to [-1, 1] based on actual range, then to [0, modulus)
     x_normalized = x / max_val  # Now in [-1, 1]
     x_scaled = ((x_normalized + 1.0) * (modulus / 2.0))
 
-    # Convert to integer and take modulo
-    x_int = x_scaled.to(torch.int32)
-    x_2adic = x_int % modulus
+    # Convert to appropriate integer type
+    x_int = x_scaled.to(torch.int32)  # Use int32 for intermediate computation
+    x_2adic = (x_int % modulus).to(dtype)  # Cast to target dtype
 
     return x_2adic, max_val
 
