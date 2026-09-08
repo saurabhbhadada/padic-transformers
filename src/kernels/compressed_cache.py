@@ -6,14 +6,15 @@ achieving 2x memory reduction for KV cache.
 """
 
 import torch
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 import sys
 sys.path.insert(0, '/workspace/padic-transformers')
 
+from transformers.cache_utils import Cache
 from src.kernels import float_to_2adic, _2adic_to_float, CacheCompressionConfig
 
 
-class CompressedCache:
+class CompressedCache(Cache):
     """
     Compressed KV cache using 2-adic quantization.
 
@@ -29,6 +30,7 @@ class CompressedCache:
     """
 
     def __init__(self, compression_config: CacheCompressionConfig):
+        super().__init__()
         self.compression_config = compression_config
 
         # Storage format: List of (compressed_tensor, scale_factor) per layer
@@ -127,6 +129,62 @@ class CompressedCache:
     def get_max_length(self) -> Optional[int]:
         """Get maximum cache length (None for dynamic)."""
         return None
+
+    def get_usable_length(
+        self, new_seq_length: int, layer_idx: Optional[int] = 0
+    ) -> int:
+        """
+        Get the usable length of the cache for a given layer and new sequence length.
+
+        Args:
+            new_seq_length: The new sequence length being added
+            layer_idx: The layer index
+
+        Returns:
+            The usable length (same as current sequence length for our cache)
+        """
+        return self.get_seq_length(layer_idx)
+
+    def reorder_cache(self, beam_idx: torch.LongTensor):
+        """
+        Reorder cache for beam search (not implemented yet).
+
+        Args:
+            beam_idx: Beam indices for reordering
+        """
+        # For now, raise error - beam search not supported with compression
+        raise NotImplementedError(
+            "Beam search is not yet supported with CompressedCache. "
+            "Use standard cache for beam search operations."
+        )
+
+    def get_query_offset(self, layer_idx: int = 0) -> int:
+        """
+        Get the query offset for a given layer.
+
+        For standard autoregressive generation, this is 0.
+
+        Args:
+            layer_idx: The layer index
+
+        Returns:
+            Query offset (0 for standard generation)
+        """
+        return 0
+
+    def reset(self):
+        """Reset/clear all cached states."""
+        self.key_cache = []
+        self.value_cache = []
+        self.seen_tokens = 0
+
+    @property
+    def batch_size(self) -> int:
+        """Get the batch size from the cache."""
+        if len(self.key_cache) == 0:
+            return 0
+        key_compressed, _ = self.key_cache[0]
+        return key_compressed.shape[0]  # Batch dimension
 
     def get_memory_footprint(self) -> dict:
         """
