@@ -58,7 +58,8 @@ def load_eval_dataset(dataset_name: str, split: str = "test"):
     print(f"\nLoading dataset: {dataset_name}")
 
     if dataset_name == "wikitext":
-        dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split=split)
+        # Use Hugging Face dataset path format
+        dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1", split=split)
         text_key = "text"
     elif dataset_name == "ptb":
         dataset = load_dataset("ptb_text_only", split=split)
