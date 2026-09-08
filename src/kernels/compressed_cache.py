@@ -30,7 +30,10 @@ class CompressedCache(Cache):
     """
 
     def __init__(self, compression_config: CacheCompressionConfig):
-        super().__init__()
+        # Initialize base Cache with empty layers list
+        # We manage our own compressed storage instead of using layer objects
+        super().__init__(layers=[])
+
         self.compression_config = compression_config
 
         # Storage format: List of (compressed_tensor, scale_factor) per layer
