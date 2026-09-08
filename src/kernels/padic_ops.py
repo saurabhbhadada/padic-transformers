@@ -62,13 +62,21 @@ def float_to_2adic(x: torch.Tensor, precision: int = 8) -> Tuple[torch.Tensor, t
     else:
         dtype = torch.int32
 
-    # Avoid division by zero
-    if max_val == 0:
-        return torch.zeros_like(x, dtype=dtype), torch.tensor(1.0, device=x.device)
+    # Avoid division by zero - use small epsilon for numerical stability
+    eps = 1e-8
+    if max_val.item() < eps:
+        return torch.zeros_like(x, dtype=dtype), torch.tensor(1.0, device=x.device, dtype=torch.float32)
 
-    # Scale to [-1, 1] based on actual range, then to [0, modulus)
+    # Add small epsilon to prevent exact division by zero
+    max_val = max_val + eps
+
+    # Scale to [-1, 1] based on actual range, then to [0, modulus-1]
     x_normalized = x / max_val  # Now in [-1, 1]
     x_scaled = ((x_normalized + 1.0) * (modulus / 2.0))
+
+    # Clamp to [0, modulus-1] to prevent wraparound bug
+    # Without this, max values (1.0) map to modulus, which wraps to 0 (maps to -1.0)!
+    x_scaled = torch.clamp(x_scaled, 0, modulus - 1)
 
     # Convert to appropriate integer type
     x_int = x_scaled.to(torch.int32)  # Use int32 for intermediate computation
