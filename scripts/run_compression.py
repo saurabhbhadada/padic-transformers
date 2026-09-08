@@ -11,6 +11,15 @@ Usage:
         --output results/compression_2x.json
 """
 
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Run evaluation with KV-cache compression in attention layers.
+
+This applies compression directly in attention computation,
+giving real perplexity impact from quantization.
+"""
+
 import argparse
 import json
 import time
@@ -21,18 +30,14 @@ sys.path.insert(0, '/workspace/padic-transformers')
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
-import numpy as np
 from tqdm import tqdm
 
-from src.kernels import (
-    KVCacheCompressor,
-    CacheCompressionConfig,
-)
-from src.models.compressed_model import CompressedModelWrapper
+from src.kernels import CacheCompressionConfig
+from src.models import apply_compression_to_model
 
 
 def load_model_and_tokenizer(model_name: str, cache_dir: Path, compression_config: CacheCompressionConfig):
-    """Load pretrained model and tokenizer, wrap with compression."""
+    """Load pretrained model and tokenizer, apply compression to attention."""
     print(f"\nLoading model: {model_name}")
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -52,10 +57,9 @@ def load_model_and_tokenizer(model_name: str, cache_dir: Path, compression_confi
 
     print(f"✓ Model loaded: {sum(p.numel() for p in model.parameters())/1e9:.2f}B params")
 
-    # Wrap model with compression
+    # Apply compression to attention layers
     if compression_config.strategy != "none":
-        print(f"✓ Wrapping model with {compression_config.strategy} compression")
-        model = CompressedModelWrapper(model, compression_config)
+        model = apply_compression_to_model(model, compression_config)
 
     return model, tokenizer
 
@@ -113,20 +117,14 @@ def compute_perplexity_with_compression(
     max_samples: int = None,
 ):
     """
-    Compute perplexity with KV-cache compression.
+    Compute perplexity with K/V compression in attention.
 
-    The model is already wrapped with compression if needed,
-    so this just runs normal perplexity evaluation.
+    Compression is applied in the attention layers, so we just run
+    standard perplexity evaluation. The quantization error from
+    compressed K/V will affect the perplexity.
     """
-    # Check if model is wrapped
-    is_wrapped = isinstance(model, CompressedModelWrapper)
-    if is_wrapped:
-        model.eval()
-        model.reset_stats()
-        device = model.device
-    else:
-        model.eval()
-        device = next(model.parameters()).device
+    model.eval()
+    device = next(model.parameters()).device
 
     # Track memory
     if torch.cuda.is_available():
@@ -152,9 +150,9 @@ def compute_perplexity_with_compression(
     print(f"Compression: {compression_config.strategy}")
 
     # Compute perplexity with sliding window
+    # Compression happens inside attention layers automatically
     nlls = []
     num_tokens = 0
-    past_key_values = None
 
     max_length = min(input_ids.shape[1], context_length * 10)  # Limit for memory
 
@@ -166,21 +164,12 @@ def compute_perplexity_with_compression(
             input_batch = input_ids[:, begin_loc:end_loc]
             target_ids = input_batch.clone()
 
-            # Forward pass WITH cache - compression happens automatically if model is wrapped
-            outputs = model(
-                input_batch,
-                labels=target_ids,
-                use_cache=True,
-                past_key_values=past_key_values
-            )
+            # Forward pass - K/V compression happens in attention layers
+            outputs = model(input_batch, labels=target_ids)
             neg_log_likelihood = outputs.loss * trg_len
 
             nlls.append(neg_log_likelihood)
             num_tokens += trg_len
-
-            # Keep the cache for next iteration (will be compressed if wrapped)
-            if hasattr(outputs, 'past_key_values'):
-                past_key_values = outputs.past_key_values
 
             if end_loc == input_ids.shape[1]:
                 break
@@ -194,25 +183,16 @@ def compute_perplexity_with_compression(
     else:
         peak_memory_mb = 0
 
-    # Get compression stats from wrapped model
-    if is_wrapped:
-        comp_stats = model.get_compression_stats()
-        avg_compression_time_ms = comp_stats.get('avg_compression_time_ms', 0)
-        avg_decompression_time_ms = comp_stats.get('avg_decompression_time_ms', 0)
-        memory_saved_mb = comp_stats.get('memory_saved_mb', 0)
-
-        # Estimate compression ratio based on strategy
-        if compression_config.strategy == "simple_2x":
-            compression_ratio = 2.0
-        elif compression_config.strategy == "adaptive":
-            compression_ratio = 3.5  # Approximate based on 16/8/4 bit mix
-        else:
-            compression_ratio = 1.0
+    # Compression ratio based on strategy
+    if compression_config.strategy == "simple_2x":
+        compression_ratio = 2.0
+        precision_bits = compression_config.uniform_precision
+    elif compression_config.strategy == "adaptive":
+        compression_ratio = 3.5  # Approximate: mix of 16/8/4 bits
+        precision_bits = "adaptive"
     else:
-        avg_compression_time_ms = 0
-        avg_decompression_time_ms = 0
-        memory_saved_mb = 0
         compression_ratio = 1.0
+        precision_bits = 16
 
     results = {
         "perplexity": ppl.item(),
@@ -220,12 +200,8 @@ def compute_perplexity_with_compression(
         "peak_memory_mb": peak_memory_mb,
         "context_length": context_length,
         "compression_strategy": compression_config.strategy,
-        "cache_original_mb": peak_memory_mb,  # Approximation
-        "cache_compressed_mb": peak_memory_mb / compression_ratio if compression_ratio > 1 else peak_memory_mb,
+        "precision_bits": precision_bits,
         "compression_ratio": compression_ratio,
-        "avg_compression_time_ms": avg_compression_time_ms,
-        "avg_decompression_time_ms": avg_decompression_time_ms,
-        "memory_saved_mb": memory_saved_mb,
     }
 
     return results
