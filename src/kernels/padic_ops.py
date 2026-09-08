@@ -108,11 +108,14 @@ def _2adic_to_float(x: torch.Tensor, precision: int = 8, scale: torch.Tensor = N
     """
     modulus = 2 ** precision
 
-    # Ensure input is in valid range
-    x_mod = x % modulus
+    # Convert to float first to avoid dtype issues with modulo
+    # (e.g., uint8 % 256 would wrap modulus to 0 causing ZeroDivisionError)
+    x_float = x.to(torch.float32)
 
-    # Convert to float and scale back to [-1, 1]
-    x_float = x_mod.to(torch.float32)
+    # Ensure input is in valid range [0, modulus-1]
+    x_float = x_float % modulus
+
+    # Scale back to [-1, 1]
     x_normalized = (x_float / (modulus / 2.0)) - 1.0
 
     # Scale back to original range
