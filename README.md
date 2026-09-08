@@ -26,14 +26,18 @@ make jupyter  # Open notebooks/01_visualize_compression_results.ipynb
 
 ## Results
 
-**First Experiment:** ✅ **2x KV Cache Compression** (Pythia-1B, WikiText-103, 2048 context)
+**First Experiment:** ✅ **2x KV Cache Compression**
+
+**Setup:** Pythia-1B, WikiText-103, 2048 tokens context, 8-bit precision
 
 | Metric | Baseline | Compressed (8-bit) | Improvement |
 |--------|----------|-------------------|-------------|
 | **Perplexity** | 13.48 | 13.55 | 0.5% degradation ✅ |
-| **Cache Memory** | 256 MB | 128 MB | **2.0x compression** 🎯 |
+| **Cache Memory** | 256 MB* | 128 MB | **2.0x compression** 🎯 |
 | **Peak Memory** | 1520 MB | 1408 MB | 7.4% reduction |
-| **Inference Speed** | 3.36s | 2.85s | **15% faster** ⚡ |
+| **Inference Speed** | 2.86s | 2.83s |  |
+
+*Baseline cache is theoretical (element count × float16 size); compressed is measured
 
 **Key Findings:**
 - **Quality preservation**: <1% perplexity increase with 8-bit 2-adic quantization

@@ -39,9 +39,11 @@ Using 2-adic (p=2) quantization to compress transformer KV cache from float16 (1
 
 **Metrics:**
 - Perplexity (language modeling quality)
-- Peak memory usage (total GPU memory)
+- Peak memory usage (total GPU memory, measured via `torch.cuda.max_memory_allocated()`)
 - Cache memory (KV cache footprint)
-- Inference time
+  - Compressed: Measured from actual uint8 storage
+  - Baseline: Theoretical calculation (element count × 2 bytes for float16)
+- Inference time (wall-clock time for evaluation)
 
 ### Results
 
@@ -51,8 +53,14 @@ Using 2-adic (p=2) quantization to compress transformer KV cache from float16 (1
 |--------|----------|-------------------|--------|
 | **Perplexity** | 13.4808 | 13.5480 | **+0.50%** ✅ |
 | **Peak Memory** | 1520 MB | 1408 MB | **-7.4%** ✅ |
-| **Cache Memory** | 256 MB | 128 MB | **-50% (2x)** ✅ |
-| **Inference Time** | 3.36s | 2.85s | **-15%** ✅ |
+| **Cache Memory** | 256 MB* | 128 MB | **-50% (2x)** ✅ |
+| **Inference Time** | 2.86s | 2.83s |  |
+
+**Note on Cache Memory:**
+- *Baseline cache (256 MB) is a **theoretical calculation** based on float16 storage requirements
+- Compressed cache (128 MB) is **measured** from actual uint8 storage in CompressedCache
+- The 2x compression ratio is mathematically correct: uint8 (1 byte) vs float16 (2 bytes)
+
 
 #### Key Findings
 
@@ -114,6 +122,7 @@ Using 2-adic (p=2) quantization to compress transformer KV cache from float16 (1
 2. Try 4-bit precision - potential 4x compression
 3. Evaluate on larger models (Pythia-2.8B, 6.9B)
 4. Compare with INT8 and GPTQ quantization methods
+5. Add explicit baseline cache measurement using DynamicCache (for validation)
 
 **Research Directions:**
 1. Adaptive precision: Use different bits for recent vs old tokens
