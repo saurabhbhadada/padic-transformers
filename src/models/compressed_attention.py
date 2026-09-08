@@ -73,13 +73,13 @@ def create_compressed_attention_forward(compression_config: CacheCompressionConf
             else:
                 precision = 16
 
-            # Compress K and V (quantize)
-            key_compressed = float_to_2adic(key_states, precision=precision)
-            value_compressed = float_to_2adic(value_states, precision=precision)
+            # Compress K and V (quantize with dynamic range)
+            key_compressed, key_scale = float_to_2adic(key_states, precision=precision)
+            value_compressed, value_scale = float_to_2adic(value_states, precision=precision)
 
             # Decompress (introduces quantization error!)
-            key_states = _2adic_to_float(key_compressed, precision=precision).to(original_dtype)
-            value_states = _2adic_to_float(value_compressed, precision=precision).to(original_dtype)
+            key_states = _2adic_to_float(key_compressed, precision=precision, scale=key_scale).to(original_dtype)
+            value_states = _2adic_to_float(value_compressed, precision=precision, scale=value_scale).to(original_dtype)
         # ===== END COMPRESSION =====
 
         # 4. Compute attention using original interface

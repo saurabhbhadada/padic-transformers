@@ -22,60 +22,71 @@ class PadicConfig:
         self.modulus = 2 ** precision
 
 
-def float_to_2adic(x: torch.Tensor, precision: int = 8) -> torch.Tensor:
+def float_to_2adic(x: torch.Tensor, precision: int = 8) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Convert floating point tensor to 2-adic representation.
+    Convert floating point tensor to 2-adic representation with dynamic range.
+
+    Uses symmetric quantization: finds max absolute value and scales accordingly.
+    This preserves the actual range of values instead of clamping to [-1, 1].
 
     Process:
-    1. Scale float to integer range
-    2. Take modulo 2^precision
-    3. Return as integer tensor
+    1. Find max absolute value for scaling
+    2. Scale to integer range based on actual data range
+    3. Take modulo 2^precision
+    4. Return quantized tensor and scale factor
 
     Args:
         x: Input tensor (float32 or bfloat16)
         precision: Number of bits for 2-adic representation (1-32)
 
     Returns:
-        Integer tensor with 2-adic representation (int32)
+        Tuple of (quantized tensor as int32, scale factor as float tensor)
 
     Example:
         >>> x = torch.tensor([0.5, -0.25, 1.0])
-        >>> x_2adic = float_to_2adic(x, precision=8)
+        >>> x_2adic, scale = float_to_2adic(x, precision=8)
         >>> x_2adic
         tensor([128, 192, 0], dtype=torch.int32)
     """
     modulus = 2 ** precision
 
-    # Normalize to [-1, 1] range (typical for neural network activations)
-    x_normalized = torch.clamp(x, -1.0, 1.0)
+    # Dynamic range quantization: use actual max absolute value
+    # This preserves the range of K/V values in transformers
+    max_val = torch.abs(x).max()
 
-    # Scale to [0, modulus) range
-    # Map [-1, 1] -> [0, modulus)
+    # Avoid division by zero
+    if max_val == 0:
+        return torch.zeros_like(x, dtype=torch.int32), torch.tensor(1.0, device=x.device)
+
+    # Scale to [-1, 1] based on actual range, then to [0, modulus)
+    x_normalized = x / max_val  # Now in [-1, 1]
     x_scaled = ((x_normalized + 1.0) * (modulus / 2.0))
 
     # Convert to integer and take modulo
     x_int = x_scaled.to(torch.int32)
     x_2adic = x_int % modulus
 
-    return x_2adic
+    return x_2adic, max_val
 
 
-def _2adic_to_float(x: torch.Tensor, precision: int = 8) -> torch.Tensor:
+def _2adic_to_float(x: torch.Tensor, precision: int = 8, scale: torch.Tensor = None) -> torch.Tensor:
     """
     Convert 2-adic representation back to floating point.
 
-    Inverse operation of float_to_2adic.
+    Inverse operation of float_to_2adic. Requires the scale factor from quantization.
 
     Args:
         x: Integer tensor with 2-adic representation
         precision: Number of bits used in 2-adic representation
+        scale: Scale factor (max absolute value) from quantization
 
     Returns:
-        Float tensor in [-1, 1] range
+        Float tensor in original range
 
     Example:
         >>> x_2adic = torch.tensor([128, 192, 0], dtype=torch.int32)
-        >>> x_float = _2adic_to_float(x_2adic, precision=8)
+        >>> scale = torch.tensor(1.0)
+        >>> x_float = _2adic_to_float(x_2adic, precision=8, scale=scale)
         >>> x_float
         tensor([0.0000, 0.5000, -1.0000])
     """
@@ -87,6 +98,10 @@ def _2adic_to_float(x: torch.Tensor, precision: int = 8) -> torch.Tensor:
     # Convert to float and scale back to [-1, 1]
     x_float = x_mod.to(torch.float32)
     x_normalized = (x_float / (modulus / 2.0)) - 1.0
+
+    # Scale back to original range
+    if scale is not None:
+        x_normalized = x_normalized * scale
 
     return x_normalized
 
