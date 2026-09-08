@@ -67,6 +67,8 @@ class CompressedModelWrapper:
 
         # Decompress past cache if provided
         if past_key_values is not None and self.compression_config.strategy != 'none':
+            if self.compression_stats['total_compressions'] == 0:
+                print(f"[DEBUG] Starting decompression for {len(past_key_values)} layers")
             t0 = time.time()
             past_key_values = self._decompress_cache(past_key_values)
             self.compression_stats['total_decompression_time'] += time.time() - t0
@@ -84,10 +86,16 @@ class CompressedModelWrapper:
         # Compress new cache if using cache
         if use_cache and hasattr(outputs, 'past_key_values') and outputs.past_key_values is not None:
             if self.compression_config.strategy != 'none':
+                if self.compression_stats['total_compressions'] == 0:
+                    print(f"[DEBUG] First compression happening with strategy: {self.compression_config.strategy}")
                 t0 = time.time()
                 compressed_cache = self._compress_cache(outputs.past_key_values)
-                self.compression_stats['total_compression_time'] += time.time() - t0
+                comp_time = time.time() - t0
+                self.compression_stats['total_compression_time'] += comp_time
                 self.compression_stats['total_compressions'] += 1
+
+                if self.compression_stats['total_compressions'] == 1:
+                    print(f"[DEBUG] First compression took {comp_time*1000:.2f}ms")
 
                 # Replace cache with compressed version
                 outputs.past_key_values = compressed_cache

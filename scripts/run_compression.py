@@ -154,6 +154,7 @@ def compute_perplexity_with_compression(
     # Compute perplexity with sliding window
     nlls = []
     num_tokens = 0
+    past_key_values = None
 
     max_length = min(input_ids.shape[1], context_length * 10)  # Limit for memory
 
@@ -165,12 +166,21 @@ def compute_perplexity_with_compression(
             input_batch = input_ids[:, begin_loc:end_loc]
             target_ids = input_batch.clone()
 
-            # Forward pass - compression happens automatically if model is wrapped
-            outputs = model(input_batch, labels=target_ids, use_cache=False)
+            # Forward pass WITH cache - compression happens automatically if model is wrapped
+            outputs = model(
+                input_batch,
+                labels=target_ids,
+                use_cache=True,
+                past_key_values=past_key_values
+            )
             neg_log_likelihood = outputs.loss * trg_len
 
             nlls.append(neg_log_likelihood)
             num_tokens += trg_len
+
+            # Keep the cache for next iteration (will be compressed if wrapped)
+            if hasattr(outputs, 'past_key_values'):
+                past_key_values = outputs.past_key_values
 
             if end_loc == input_ids.shape[1]:
                 break
