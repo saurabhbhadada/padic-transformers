@@ -108,27 +108,37 @@ class CompressedModelWrapper:
         if cache is None:
             return None
 
-        # Handle DynamicCache
+        # Handle DynamicCache - has .layers list with .keys and .values
         if hasattr(cache, '__class__') and 'DynamicCache' in cache.__class__.__name__:
             compressed_cache = []
 
-            for layer_idx in range(len(cache.key_cache)):
-                keys = cache.key_cache[layer_idx]
-                values = cache.value_cache[layer_idx]
+            # Access via layers attribute
+            if hasattr(cache, 'layers'):
+                for layer_idx, layer in enumerate(cache.layers):
+                    keys = layer.keys
+                    values = layer.values
 
-                # Compress
-                k_comp, v_comp = self.compressor.compress(
-                    keys, values, position=self.current_position
-                )
+                    # Compress
+                    k_comp, v_comp = self.compressor.compress(
+                        keys, values, position=self.current_position
+                    )
 
-                # Track memory savings
-                original_size = keys.element_size() * keys.numel() * 2  # K + V
-                compressed_size = k_comp.element_size() * k_comp.numel() * 2
-                self.compression_stats['memory_saved_bytes'] += (original_size - compressed_size)
+                    # Track memory savings
+                    original_size = keys.element_size() * keys.numel() * 2  # K + V
+                    compressed_size = k_comp.element_size() * k_comp.numel() * 2
+                    self.compression_stats['memory_saved_bytes'] += (original_size - compressed_size)
 
-                compressed_cache.append((k_comp, v_comp))
+                    compressed_cache.append((k_comp, v_comp))
 
-            return compressed_cache
+                return tuple(compressed_cache)
+            else:
+                # Fallback: iterate using __iter__
+                for keys, values, _ in cache:
+                    k_comp, v_comp = self.compressor.compress(
+                        keys, values, position=self.current_position
+                    )
+                    compressed_cache.append((k_comp, v_comp))
+                return tuple(compressed_cache)
 
         # Handle tuple cache
         elif isinstance(cache, (tuple, list)):
