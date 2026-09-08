@@ -24,10 +24,30 @@ CUDA_VISIBLE_DEVICES=0 make exec CMD="python scripts/run_compression.py --compre
 make jupyter  # Open notebooks/01_visualize_compression_results.ipynb
 ```
 
+## Results
+
+**First Experiment:** ✅ **2x KV Cache Compression** (Pythia-1B, WikiText-103, 2048 context)
+
+| Metric | Baseline | Compressed (8-bit) | Improvement |
+|--------|----------|-------------------|-------------|
+| **Perplexity** | 13.48 | 13.55 | 0.5% degradation ✅ |
+| **Cache Memory** | 256 MB | 128 MB | **2.0x compression** 🎯 |
+| **Peak Memory** | 1520 MB | 1408 MB | 7.4% reduction |
+| **Inference Speed** | 3.36s | 2.85s | **15% faster** ⚡ |
+
+**Key Findings:**
+- **Quality preservation**: <1% perplexity increase with 8-bit 2-adic quantization
+- **2x memory reduction**: KV cache compressed from float16 → uint8
+- **Speed bonus**: Faster inference from reduced memory bandwidth
+- **Scalable**: Savings increase linearly with context length
+
+📊 **[Full experimental details](docs/EXPERIMENTS.md)** - Hypothesis, methodology, analysis
+
 ## Documentation
 
 📚 **Core Documentation**
 - **[Experimental Plan](docs/EXPERIMENTAL_PLAN.md)** - Complete research roadmap, both tracks, timeline ⭐ START HERE
+- **[Experimental Log](docs/EXPERIMENTS.md)** - Hypothesis, results, and analysis for all experiments 📊
 - [Project Overview & Architecture](docs/PROJECT.md) - Full project details, datasets, benchmarks
 - [Leaderboard Submission Guide](docs/LEADERBOARDS.md) - Publication strategy, evaluation methodology
 
