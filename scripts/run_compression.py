@@ -283,9 +283,8 @@ def main():
         print(f"Results for context length {ctx_len}:")
         print(f"  Perplexity: {results['perplexity']:.4f}")
         print(f"  Peak memory: {results['peak_memory_mb']:.2f} MB")
-        print(f"  Cache compression: {results['compression_ratio']:.2f}x")
-        print(f"  Cache size: {results['cache_original_mb']:.2f} MB → {results['cache_compressed_mb']:.2f} MB")
-        print(f"  Compression overhead: {results['avg_compression_time_ms']:.3f} ms")
+        print(f"  Compression ratio: {results['compression_ratio']:.2f}x")
+        print(f"  Precision: {results['precision_bits']} bits")
         print(f"  Time: {elapsed_time:.2f}s")
         print(f"{'='*60}")
 
