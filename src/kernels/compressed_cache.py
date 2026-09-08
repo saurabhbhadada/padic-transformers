@@ -60,6 +60,9 @@ class CompressedCache(Cache):
         Returns:
             Full key and value states (decompressed) including cache
         """
+        # Store original dtype to preserve it after decompression
+        original_dtype = key_states.dtype
+
         # Get precision
         if self.compression_config.strategy == 'simple_2x':
             precision = self.compression_config.uniform_precision
@@ -117,8 +120,8 @@ class CompressedCache(Cache):
 
         # Decompress for attention computation
         # This is where quantization error is introduced!
-        key_states = _2adic_to_float(key_compressed, precision=precision, scale=key_scale)
-        value_states = _2adic_to_float(value_compressed, precision=precision, scale=value_scale)
+        key_states = _2adic_to_float(key_compressed, precision=precision, scale=key_scale).to(original_dtype)
+        value_states = _2adic_to_float(value_compressed, precision=precision, scale=value_scale).to(original_dtype)
 
         return key_states, value_states
 
