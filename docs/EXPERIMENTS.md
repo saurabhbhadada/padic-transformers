@@ -4,7 +4,26 @@ This document tracks our experimental hypotheses, methodology, and results for p
 
 ---
 
-## Experiment 1: KV Cache Compression with 2-adic Quantization
+## Experiment 0: Baseline KV Cache Quantization (INT8)
+
+**Status:** ✅ Complete - **Baseline established**
+
+**Note:** This experiment implements standard INT8 quantization (dynamic range, symmetric). While described as "2-adic", it does not yet exploit p-adic ultrametric structure. This serves as **Baseline/Experiment 0** for comparing against true p-adic methods.
+
+---
+
+## Experiment 1: Probing for Ultrametric Structure in KV Cache
+
+**Status:** 🔄 **Planned** - Main research contribution
+
+**Research Question:**
+> Do transformer KV representations exhibit meaningful ultrametric structure that can be exploited for compression, retrieval, or attention approximation better than Euclidean geometry?
+
+This is the **core scientific question** that will determine if p-adic compression is viable.
+
+---
+
+## Experiment 0 Results: Baseline INT8 Quantization
 
 **Date:** 2026-09-09
 **Status:** ✅ **Success** - Hypothesis confirmed
@@ -115,26 +134,151 @@ Using 2-adic (p=2) quantization to compress transformer KV cache from float16 (1
 2. Novel compression technique with strong empirical results
 3. Production-ready implementation compatible with standard frameworks
 
-### Future Work
+### Limitations & Next Steps
 
-**Immediate Next Steps:**
-1. Test at longer contexts (4k, 8k, 16k) - expect larger savings
-2. Try 4-bit precision - potential 4x compression
-3. Evaluate on larger models (Pythia-2.8B, 6.9B)
-4. Compare with INT8 and GPTQ quantization methods
-5. Add explicit baseline cache measurement using DynamicCache (for validation)
+**Current Limitations:**
+- This is **standard INT8 quantization**, not true p-adic compression
+- Does not exploit ultrametric structure
+- No evidence yet that p-adic geometry helps transformers
+- Serves as baseline only
 
-**Research Directions:**
-1. Adaptive precision: Use different bits for recent vs old tokens
-2. Attention-aware compression: Higher precision for high-attention positions
-3. Hybrid models: Apply p-adic to weights + activations
-4. Theoretical analysis: Prove bounds on quantization error propagation
+**Next Experiment:**
+→ **Experiment 1: Probe for ultrametric structure in real KV caches**
 
 ---
 
-## Experiment 2: [Placeholder]
+## Experiment 1: Probing for P-adic Structure in KV Cache
 
-*To be added as we run more experiments*
+**Status:** 📋 **Planned**
+
+**→ [See PROBE_GUIDE.md for step-by-step instructions](PROBE_GUIDE.md)**
+
+### Hypothesis
+
+**Primary Hypothesis:**
+Transformer KV representations contain exploitable ultrametric structure where p-adic distance $d_2(K_i, K_j) = 2^{-v_2(K_i - K_j)}$ correlates with transformer behavior better than Euclidean distance.
+
+**Sub-hypotheses:**
+1. **Attention correlation**: $d_2(K_i, K_j)$ predicts attention similarity
+2. **Semantic correlation**: p-adic neighbors share semantic meaning
+3. **Hierarchical structure**: KV cache naturally forms ultrametric trees
+4. **Compression potential**: Ultrametric clustering outperforms Euclidean clustering
+
+**Rejection criteria:**
+If p-adic distance shows no stronger correlation than random baseline, abandon p-adic KV compression.
+
+### Methodology
+
+**Phase 1: Extract Real KV States**
+- Use pretrained models: Pythia-1B, Llama-2-7B, Qwen-2-7B
+- Extract KV cache from real inference on multiple datasets
+- Sample diverse contexts: code, math, natural language, reasoning
+
+**Phase 2: Compute Distance Metrics**
+For all KV vector pairs $(K_i, K_j)$:
+
+1. **Euclidean distance**: $||K_i - K_j||_2$
+2. **Cosine similarity**: $\frac{K_i \cdot K_j}{||K_i|| \cdot ||K_j||}$
+3. **P-adic distance**: $d_2(K_i, K_j) = 2^{-v_2(K_i - K_j)}$
+   - Quantize to integers: $\hat{K} = \text{round}(K \times 2^{16})$
+   - Compute valuation: $v_2(\hat{K}_i - \hat{K}_j)$
+
+**Phase 3: Correlation Analysis**
+
+Test if p-adic distance predicts:
+1. **Attention similarity**:
+   - Measure: $\text{corr}(d_2(K_i, K_j), |\alpha_i - \alpha_j|)$ where $\alpha$ = attention weights
+   - Baseline: Euclidean distance correlation
+
+2. **Semantic similarity**:
+   - Measure: $\text{corr}(d_2(K_i, K_j), \text{token\_similarity}(i, j))$
+   - Token similarity from: WordNet, embedding space, syntactic role
+
+3. **Future attention importance**:
+   - Measure: Do p-adic neighbors get similar attention in future layers?
+
+4. **Clustering quality**:
+   - Build hierarchical clustering using: Euclidean vs p-adic distance
+   - Metric: Silhouette score, attention reconstruction error
+
+**Phase 4: Statistical Validation**
+
+- Compute p-values for all correlations
+- Compare against random baseline (shuffled distances)
+- Require $p < 0.01$ and $\Delta r > 0.1$ for significance
+
+### Expected Outcomes
+
+**If signal exists:**
+- $\text{corr}(d_2, \text{attention}) > \text{corr}(\text{Euclidean}, \text{attention})$
+- P-adic clustering gives lower attention reconstruction error
+- Ultrametric tree structure aligns with semantic hierarchy
+
+**If no signal:**
+- P-adic correlations ≤ Euclidean correlations
+- No advantage in clustering or prediction
+- → **Abandon p-adic KV compression**, explore other directions
+
+### Success Criteria
+
+**Minimum viable signal:**
+- P-adic distance must show **10% stronger correlation** than Euclidean for at least one metric
+- Statistically significant across multiple models/datasets
+- Interpretable: Can explain why structure exists
+
+**Strong signal (publishable):**
+- P-adic distance shows **30%+ stronger correlation**
+- Enables better compression (lower error at same memory)
+- Novel theoretical insight into transformer geometry
+
+---
+
+## Experiment 2: PadicKV - Hierarchical KV Cache
+
+**Status:** ⏸️ **Blocked** - Depends on Experiment 1 results
+
+Only proceed if Experiment 1 shows strong ultrametric signal.
+
+### Hypothesis
+
+If KV cache has ultrametric structure, hierarchical compression using p-adic trees will outperform flat quantization.
+
+**Proposed Architecture:**
+```
+Recent tokens: Full precision (FP16)
+       ↓
+Medium age: Cluster representatives (INT8)
+       ↓
+Old tokens: Hierarchical p-adic tree (INT4/INT2)
+```
+
+**Baseline comparison:**
+- PadicKV INT4 vs Standard INT4
+- Same memory budget, measure perplexity difference
+
+---
+
+## Research Roadmap
+
+```
+Phase 0: ✅ Baseline INT8 quantization (current)
+          ↓
+Phase 1: 📋 Probe for p-adic structure
+          ↓
+      Decision point:
+          ↓
+    Signal exists?
+          ↓
+     YES         NO
+      ↓          ↓
+Phase 2:      Pivot to
+PadicKV       other methods
+```
+
+**Timeline:**
+- Phase 1: 2-3 weeks (extract KV, run correlations, analyze)
+- Decision: 1 week (interpret results, decide direction)
+- Phase 2: 4-6 weeks (if pursuing PadicKV)
 
 ---
 

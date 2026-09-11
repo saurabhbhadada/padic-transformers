@@ -26,9 +26,11 @@ make jupyter  # Open notebooks/01_visualize_compression_results.ipynb
 
 ## Results
 
-**First Experiment:** ✅ **2x KV Cache Compression**
+**Experiment 0:** ✅ **Baseline INT8 Quantization** (Not yet true p-adic compression)
 
 **Setup:** Pythia-1B, WikiText-103, 2048 tokens context, 8-bit precision
+
+**Note:** This implements standard dynamic-range INT8 quantization as a baseline. The core research question—whether transformer KV caches exhibit exploitable p-adic/ultrametric structure—is addressed in Experiment 1 (planned).
 
 | Metric | Baseline | Compressed (8-bit) | Improvement |
 |--------|----------|-------------------|-------------|
@@ -52,6 +54,7 @@ make jupyter  # Open notebooks/01_visualize_compression_results.ipynb
 📚 **Core Documentation**
 - **[Experimental Plan](docs/EXPERIMENTAL_PLAN.md)** - Complete research roadmap, both tracks, timeline ⭐ START HERE
 - **[Experimental Log](docs/EXPERIMENTS.md)** - Hypothesis, results, and analysis for all experiments 📊
+- **[P-adic Probe Guide](docs/PROBE_GUIDE.md)** - Step-by-step instructions for Experiment 1 🔬
 - [Project Overview & Architecture](docs/PROJECT.md) - Full project details, datasets, benchmarks
 - [Leaderboard Submission Guide](docs/LEADERBOARDS.md) - Publication strategy, evaluation methodology
 
