@@ -273,19 +273,33 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
         raise ValueError("No KV states extracted! Check if texts are valid.")
 
     num_samples = len(kv_states['keys'])
-    num_layers = len(kv_states['keys'][0]) if num_samples > 0 else 0
+
+    # Check ALL samples to find min layers (some samples might have fewer layers)
+    layer_counts = [len(sample) for sample in kv_states['keys']]
+    min_layers = min(layer_counts) if layer_counts else 0
+    max_layers = max(layer_counts) if layer_counts else 0
 
     print(f"\nExtracted KV states:")
     print(f"  Samples: {num_samples}")
-    print(f"  Layers per sample: {num_layers}")
+    print(f"  Layers per sample: {min_layers} (min) - {max_layers} (max)")
 
-    # Check if layer_idx is valid
-    if layer_idx >= num_layers:
-        raise ValueError(f"Layer {layer_idx} doesn't exist! Model only has {num_layers} layers (0-{num_layers-1})")
+    # Check if layer_idx is valid for ALL samples
+    if layer_idx >= min_layers:
+        raise ValueError(
+            f"Layer {layer_idx} doesn't exist in all samples! "
+            f"Minimum layers: {min_layers} (valid: 0-{min_layers-1})"
+        )
 
-    # Extract keys and attention for this layer
-    keys = [sample[layer_idx] for sample in kv_states['keys']]
-    attentions = [sample[layer_idx] for sample in kv_states['attention_weights']]
+    # Extract keys and attention for this layer (only from samples that have it)
+    keys = []
+    attentions = []
+
+    for i, sample in enumerate(kv_states['keys']):
+        if len(sample) > layer_idx:
+            keys.append(sample[layer_idx])
+            attentions.append(kv_states['attention_weights'][i][layer_idx])
+
+    print(f"  Valid samples for layer {layer_idx}: {len(keys)}/{num_samples}")
 
     # Try GPU version first, fallback to CPU
     if use_gpu and torch.cuda.is_available():
