@@ -78,24 +78,15 @@ def extract_kv_states(model, tokenizer, texts, max_length=512):
             # Forward pass with output_attentions=True
             outputs = model(**inputs, output_attentions=True, use_cache=True)
 
-            # Extract KV cache and attentions
+            # Extract KV cache from past_key_values
             past_kv = outputs.past_key_values
-            attentions = outputs.attentions
-
-            # Skip if no cache or attentions were generated
             if past_kv is None or len(past_kv) == 0:
-                continue
-            if attentions is None or len(attentions) == 0:
-                continue
-
-            # Ensure they have the same number of layers
-            if len(past_kv) != len(attentions):
                 continue
 
             # Store keys, values, and attentions
             layer_keys = [kv[0].cpu() for kv in past_kv]
             layer_values = [kv[1].cpu() for kv in past_kv]
-            layer_attentions = [attn.cpu() for attn in attentions]
+            layer_attentions = [attn.cpu() for attn in outputs.attentions]
 
             all_keys.append(layer_keys)
             all_values.append(layer_values)
@@ -274,14 +265,6 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
     print(f"Analyzing Layer {layer_idx}")
     print(f"{'='*80}")
 
-    if len(kv_states['keys']) == 0:
-        raise ValueError("No KV states extracted! Check if texts are valid.")
-
-    # Validate layer index
-    num_layers = len(kv_states['keys'][0])
-    if layer_idx >= num_layers:
-        raise ValueError(f"Layer {layer_idx} invalid. Model has {num_layers} layers (0-{num_layers-1})")
-
     # Extract keys and attention for this layer
     keys = [sample[layer_idx] for sample in kv_states['keys']]
     attentions = [sample[layer_idx] for sample in kv_states['attention_weights']]
@@ -404,6 +387,7 @@ def main():
         cache_dir=args.cache_dir,
         torch_dtype=torch.float16,
         device_map="auto",
+        attn_implementation="eager",  # Required for output_attentions to work
     )
     tokenizer = AutoTokenizer.from_pretrained(f"EleutherAI/{args.model}", cache_dir=args.cache_dir)
     print("✓ Model loaded")
