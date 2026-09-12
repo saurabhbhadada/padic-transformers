@@ -131,19 +131,12 @@ def compute_padic_distance(k1, k2, precision=16):
     # Compute difference
     diff = k1_int - k2_int
 
-    # Compute 2-adic valuation (how many times 2 divides diff)
-    # For tensors, take minimum valuation across all elements
+    # Compute 2-adic valuation for the entire tensor
     diff_flat = diff.flatten()
-    valuations = []
-
-    for val in diff_flat:
-        if val == 0:
-            valuations.append(precision)  # Infinite valuation, cap at precision
-        else:
-            valuations.append(_2adic_valuation(val.item()))
+    valuations_tensor = _2adic_valuation(diff_flat, precision=precision)
 
     # Use minimum valuation (weakest link determines distance)
-    min_valuation = min(valuations) if valuations else 0
+    min_valuation = valuations_tensor.min().item()
 
     # P-adic distance: 2^(-v_2)
     padic_dist = 2 ** (-min_valuation)
@@ -220,8 +213,9 @@ def analyze_distance_correlations_gpu(keys, attentions, num_pairs=500):
         K = key_tensor.mean(dim=0)  # [seq, dim] on GPU
         A = attn_tensor.mean(dim=0)  # [seq, seq] on GPU
 
-        # Compute ALL pairwise distances on GPU at once (fast!)
-        dists_euc = torch.cdist(K.unsqueeze(0), K.unsqueeze(0)).squeeze(0)  # [seq, seq]
+        # Compute ALL pairwise distances on GPU (cdist requires float32)
+        K_float32 = K.to(torch.float32)
+        dists_euc = torch.cdist(K_float32.unsqueeze(0), K_float32.unsqueeze(0)).squeeze(0)  # [seq, seq]
 
         # Cosine similarity matrix
         K_norm = torch.nn.functional.normalize(K, dim=1)
