@@ -63,7 +63,16 @@ def extract_kv_states(model, tokenizer, texts, max_length=512):
 
     with torch.no_grad():
         for text in tqdm(texts, desc="Extracting KV states"):
+            # Skip empty texts
+            if not text or not text.strip():
+                continue
+
             inputs = tokenizer(text, return_tensors="pt", max_length=max_length, truncation=True)
+
+            # Skip if tokenization failed
+            if inputs['input_ids'].shape[1] == 0:
+                continue
+
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
             # Forward pass with output_attentions=True
@@ -73,6 +82,10 @@ def extract_kv_states(model, tokenizer, texts, max_length=512):
             # Format: tuple of (key, value) per layer
             # Shape: [batch, num_heads, seq_len, head_dim]
             past_kv = outputs.past_key_values
+
+            # Skip if no cache was generated
+            if past_kv is None or len(past_kv) == 0:
+                continue
 
             # Store keys and values
             layer_keys = [kv[0].cpu() for kv in past_kv]  # List of keys per layer
@@ -191,19 +204,22 @@ def analyze_distance_correlations_gpu(keys, attentions, num_pairs=500):
 
     print(f"  Using GPU implementation (batch distance computation)...")
 
+    # Get GPU device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     # Process each sequence
     sequences_to_process = min(len(keys), 20)  # Sample from first 20 sequences
     pairs_per_seq = num_pairs // sequences_to_process
 
     for seq_idx in tqdm(range(sequences_to_process), desc="Processing sequences"):
-        key_tensor = keys[seq_idx][0]  # [heads, seq, dim]
-        attn_tensor = attentions[seq_idx][0]  # [heads, seq, seq]
+        key_tensor = keys[seq_idx][0].to(device)  # [heads, seq, dim] - move to GPU
+        attn_tensor = attentions[seq_idx][0].to(device)  # [heads, seq, seq] - move to GPU
 
         seq_len = key_tensor.shape[1]
         if seq_len < 2:
             continue
 
-        # Average across heads, keep on GPU
+        # Average across heads, now on GPU
         K = key_tensor.mean(dim=0)  # [seq, dim] on GPU
         A = attn_tensor.mean(dim=0)  # [seq, seq] on GPU
 
@@ -251,6 +267,21 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
     print(f"\n{'='*80}")
     print(f"Analyzing Layer {layer_idx}")
     print(f"{'='*80}")
+
+    # Debug: Check structure
+    if len(kv_states['keys']) == 0:
+        raise ValueError("No KV states extracted! Check if texts are valid.")
+
+    num_samples = len(kv_states['keys'])
+    num_layers = len(kv_states['keys'][0]) if num_samples > 0 else 0
+
+    print(f"\nExtracted KV states:")
+    print(f"  Samples: {num_samples}")
+    print(f"  Layers per sample: {num_layers}")
+
+    # Check if layer_idx is valid
+    if layer_idx >= num_layers:
+        raise ValueError(f"Layer {layer_idx} doesn't exist! Model only has {num_layers} layers (0-{num_layers-1})")
 
     # Extract keys and attention for this layer
     keys = [sample[layer_idx] for sample in kv_states['keys']]
@@ -380,7 +411,11 @@ def main():
         torch_dtype=torch.float16,
         device_map="auto",
     )
-    tokenizer = AutoTokenizer.from_pretrained(f"EleutherAI/{args.model}")
+    tokenizer = AutoTokenizer.from_pretrained(f"EleutherAI/{args.model}", cache_dir=args.cache_dir)
+
+    # Print model info
+    num_params = sum(p.numel() for p in model.parameters()) / 1e9
+    print(f"✓ Model loaded: {num_params:.2f}B params")
 
     # Load dataset
     print(f"\nLoading dataset: {dataset_path}...")
