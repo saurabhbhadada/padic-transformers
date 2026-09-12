@@ -162,54 +162,66 @@ def _2adic_to_float_signed(x: torch.Tensor, precision: int = 8) -> torch.Tensor:
     return torch.clamp(x_normalized, -1.0, 1.0)
 
 
+def _padic_valuation(x: torch.Tensor, prime: int = 2, precision: int = 8) -> torch.Tensor:
+    """
+    Compute p-adic valuation: highest power of prime p dividing x.
+
+    For each element independently: v_p(x) = max{n : p^n | x}
+
+    Args:
+        x: Integer tensor
+        prime: Prime number (2, 3, 5, etc.)
+        precision: Maximum valuation to compute
+
+    Returns:
+        Tensor of valuations (one per element)
+
+    Example:
+        >>> x = torch.tensor([1, 2, 4, 6, 8, 12, 16])
+        >>> _padic_valuation(x, prime=2, precision=8)
+        tensor([0, 1, 2, 1, 3, 2, 4])
+        >>> _padic_valuation(x, prime=3, precision=8)
+        tensor([0, 0, 0, 1, 0, 1, 0])
+    """
+    x_abs = torch.abs(x)
+
+    # Handle zeros first (infinite valuation, capped at precision)
+    zero_mask = (x_abs == 0)
+
+    # Initialize valuation for each element
+    valuation = torch.zeros_like(x_abs, dtype=torch.long)
+
+    # Create working copy
+    temp = x_abs.clone()
+
+    # For each power of prime, check divisibility
+    for i in range(precision):
+        # Check which elements are CURRENTLY divisible by prime and non-zero
+        is_divisible = (temp % prime == 0) & (~zero_mask)
+
+        # If no more divisible elements, we're done
+        if not is_divisible.any():
+            break
+
+        # Increment valuation ONLY for currently divisible elements
+        valuation[is_divisible] += 1
+
+        # Divide ONLY the divisible elements by prime
+        temp[is_divisible] = temp[is_divisible] // prime
+
+    # Set zero valuations to precision
+    valuation[zero_mask] = precision
+
+    return valuation
+
+
 def _2adic_valuation(x: torch.Tensor, precision: int = 8) -> torch.Tensor:
     """
     Compute 2-adic valuation: highest power of 2 dividing x.
 
-    The 2-adic valuation v_2(x) is the exponent of the highest power of 2
-    that divides x. This measures "how close x is to 0" in 2-adic metric.
-
-    Args:
-        x: Integer tensor (2-adic representation)
-        precision: Bit precision
-
-    Returns:
-        Tensor of valuations (integers)
-
-    Example:
-        >>> x = torch.tensor([8, 12, 15])  # 8=2^3, 12=4*3=2^2*3, 15=15
-        >>> _2adic_valuation(x)
-        tensor([3, 2, 0])
+    Wrapper around _padic_valuation for backwards compatibility.
     """
-    # Count trailing zeros in binary representation
-    # This is equivalent to v_2(x)
-
-    x_abs = torch.abs(x)
-
-    # Handle zero case
-    zero_mask = (x_abs == 0)
-
-    # Count trailing zeros using bit operations
-    # Method: repeatedly check if divisible by 2
-    valuation = torch.zeros_like(x_abs)
-    temp = x_abs.clone()
-
-    for i in range(precision):
-        # Check if even (last bit is 0)
-        is_even = (temp % 2 == 0)
-        valuation += is_even.to(valuation.dtype)
-
-        # Divide by 2 for next iteration
-        temp = temp // 2
-
-        # Stop if all are odd
-        if not is_even.any():
-            break
-
-    # Set valuation of 0 to precision (conventionally infinity)
-    valuation[zero_mask] = precision
-
-    return valuation
+    return _padic_valuation(x, prime=2, precision=precision)
 
 
 def ultrametric_distance(x: torch.Tensor, y: torch.Tensor, precision: int = 8) -> torch.Tensor:

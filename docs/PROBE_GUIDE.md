@@ -1,8 +1,10 @@
 # P-adic Structure Probe - Experimental Guide
 
-This guide walks you through running Experiment 1: Probing for ultrametric structure in transformer KV cache.
+This guide walks you through running Experiment 1: Probing for ultrametric structure in transformer **KEYS (K)**.
 
-**Goal:** Determine if p-adic distance predicts transformer behavior better than Euclidean distance.
+**IMPORTANT:** This probe analyzes KEY structure only. Values (V) are extracted but not analyzed. A separate probe for V is needed.
+
+**Goal:** Determine if p-adic distance between keys K[i] and K[j] predicts how similarly they are attended to by future queries (better than Euclidean distance).
 
 ---
 
@@ -24,6 +26,37 @@ This guide walks you through running Experiment 1: Probing for ultrametric struc
 ---
 
 ## Quick Start (Single Layer Test)
+
+### Step 0: Verify Core Math (Required)
+
+**IMPORTANT:** Run this test first to ensure `_2adic_valuation()` is working correctly.
+
+```bash
+# From your local machine (SSH'd into GPU server)
+cd /path/to/padic-transformers
+
+# Run regression test inside Docker container
+make exec CMD="python3 test_2adic_valuation.py"
+```
+
+**Expected output:**
+```
+Input:     [1, 2, 4, 6, 8, 12, 16]
+Expected:  [0, 1, 2, 1, 3, 2, 4]
+Got:       [0, 1, 2, 1, 3, 2, 4]
+
+✅ PASS: _2adic_valuation is correct
+
+============================================================
+Input:     [2, 8]
+Expected:  [1, 3]
+Got:       [1, 3]
+✅ PASS: Simple case [2, 8] correct
+```
+
+**If this test fails, DO NOT proceed with experiments.** The p-adic measurements will be incorrect.
+
+---
 
 ### Step 1: Run a Quick Test
 
@@ -94,15 +127,51 @@ SUMMARY
 
 ### Step 2: Interpret Results
 
-**Key number to look at:** `P-adic valuation vs Attention: Pearson r = 0.6210`
+**CRITICAL:** The probe tests the correct hypothesis and includes FP16 controls.
+
+**What we're testing:**
+- Do p-adically similar KEYS receive similar attention from future queries?
+- We compare `K[i]` vs `K[j]` (key vectors)
+- Against `A[:, i]` vs `A[:, j]` (attention COLUMNS - how future queries attend to them)
+- NOT `A[i, :]` vs `A[j, :]` (rows are controlled by queries Q[i], Q[j], wrong!)
+- Analysis is done **per attention head** (each head has its own subspace)
+- Results are aggregated across heads, plus per-head statistics reported
+
+**Robust S_k statistics (not degenerate min):**
+- Traditional: `min(v_p)` across all dimensions
+  - **Problem**: In 256-D, probability(min > 0) ≈ (1/2)^256 ≈ 0
+  - Nearly all pairs get min = 0, making the metric flat
+- **Solution**: S_k = fraction of dimensions where v_p ≥ k
+  - S_1: % of dims sharing ≥1 binary digit
+  - S_2: % of dims sharing ≥2 binary digits (most robust)
+  - S_3: % of dims sharing ≥3 binary digits
+  - S_4: % of dims sharing ≥4 binary digits
+  - Also compute mean(v_p) across dimensions
+
+**Controls for FP16 confounds:**
+1. **Is real >> random?** Real structure should be significantly stronger than random baseline
+2. **Does it work for p=3, p=5?** If only p=2 works, it's likely FP16 binary encoding artifact
+3. **Is it stable across precisions?** Real structure shouldn't depend on 8 vs 16 bit
+
+**Statistical rigor:**
+- **Spearman** for discrete p-adic statistics (v_p heavily tied)
+- **Pearson** for continuous metrics (Euclidean, Cosine)
+- **Bootstrap CI** for difference: `S_2 - Cosine`
+- **No arbitrary thresholds**: Interpret based on CIs
 
 **Decision criteria:**
 
-| P-adic r | Euclidean r | Advantage | Verdict | Next Step |
-|----------|-------------|-----------|---------|-----------|
-| 0.62 | 0.45 | +37% | ✅ **Strong signal** | Proceed to multi-layer sweep |
-| 0.52 | 0.47 | +10% | ⚠️ **Weak signal** | Test more layers/datasets |
-| 0.42 | 0.45 | -6% | ❌ **No advantage** | Consider pivoting |
+| S_2 - Cosine | 95% CI | Real vs Random | Multi-Prime | Verdict |
+|--------------|--------|----------------|-------------|---------|
+| +0.15 | [0.10, 0.20] | Real >> Random | ✓ | ✅ **Strong signal** → PadicKV |
+| +0.08 | [0.02, 0.14] | Real > Random | ✓ | ⚠️ **Moderate** → Investigate |
+| +0.05 | [-0.02, 0.12] | Real ≈ Random | ✗ | ❌ **FP16 artifact** |
+| -0.03 | [-0.10, 0.04] | Real ≈ Random | ✗ | ❌ **No signal** |
+
+**Key:**
+- CI excludes 0 → statistically significant
+- Real >> Random → at least +0.05 better
+- Multi-Prime → p=3, p=5 both >0.30
 
 ---
 

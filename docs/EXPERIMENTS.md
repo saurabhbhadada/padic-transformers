@@ -12,14 +12,26 @@ This document tracks our experimental hypotheses, methodology, and results for p
 
 ---
 
-## Experiment 1: Probing for Ultrametric Structure in KV Cache
+## Experiment 1: Probing for Ultrametric Structure in Keys (K)
 
 **Status:** 🔄 **Planned** - Main research contribution
 
+**SCOPE:** This experiment probes KEY structure only. A separate experiment for VALUES (V) is needed.
+
 **Research Question:**
-> Do transformer KV representations exhibit meaningful ultrametric structure that can be exploited for compression, retrieval, or attention approximation better than Euclidean geometry?
+> Do transformer KEY representations exhibit meaningful ultrametric structure?
+> Specifically: Does p-adic distance between K[i] and K[j] predict how similarly
+> future queries attend to them, better than Euclidean distance?
 
 This is the **core scientific question** that will determine if p-adic compression is viable.
+
+**Future Work:** Experiment 1b should probe VALUE structure separately.
+
+**How to probe V:**
+- V similarity: `||V[i] - V[j]||` or `d_p(V[i], V[j])`
+- V behavioral similarity: How similarly do V[i] and V[j] affect the output?
+- Method: Compare `V[i] * A[q,i]` vs `V[j] * A[q,j]` for various queries q
+- Or: Correlation between value similarity and output similarity after attention
 
 ---
 
@@ -169,10 +181,11 @@ If p-adic distance shows no stronger correlation than random baseline, abandon p
 
 ### Methodology
 
-**Phase 1: Extract Real KV States**
+**Phase 1: Extract Real K and V States**
 - Use pretrained models: Pythia-1B, Llama-2-7B, Qwen-2-7B
-- Extract KV cache from real inference on multiple datasets
+- Extract both K (keys) and V (values) from real inference
 - Sample diverse contexts: code, math, natural language, reasoning
+- NOTE: Current probe analyzes K only; V probe separate
 
 **Phase 2: Compute Distance Metrics**
 For all KV vector pairs $(K_i, K_j)$:
@@ -186,9 +199,12 @@ For all KV vector pairs $(K_i, K_j)$:
 **Phase 3: Correlation Analysis**
 
 Test if p-adic distance predicts:
-1. **Attention similarity**:
-   - Measure: $\text{corr}(d_2(K_i, K_j), |\alpha_i - \alpha_j|)$ where $\alpha$ = attention weights
+1. **Key behavior similarity** (CRITICAL: columns not rows):
+   - Keys $K_i, K_j$ control how future queries attend to positions i, j
+   - Compare $A[:, i]$ vs $A[:, j]$ (attention COLUMNS)
+   - Measure: $\text{corr}(d_2(K_i, K_j), \text{sim}(A[:,i], A[:,j]))$
    - Baseline: Euclidean distance correlation
+   - Note: NOT comparing rows $A[i,:]$ - those are controlled by queries $Q_i$, not keys!
 
 2. **Semantic similarity**:
    - Measure: $\text{corr}(d_2(K_i, K_j), \text{token\_similarity}(i, j))$
@@ -203,9 +219,24 @@ Test if p-adic distance predicts:
 
 **Phase 4: Statistical Validation**
 
-- Compute p-values for all correlations
-- Compare against random baseline (shuffled distances)
-- Require $p < 0.01$ and $\Delta r > 0.1$ for significance
+CRITICAL: Proper statistical testing, not naive p-values:
+
+1. **Use appropriate correlation**:
+   - Spearman for discrete p-adic statistics (v_p heavily tied)
+   - Pearson for continuous metrics (Euclidean, Cosine)
+
+2. **Bootstrap confidence intervals**:
+   - Compute 95% CI for difference: S_2 - Cosine
+   - Report as: `diff = 0.12, 95% CI = [0.08, 0.16]`
+   - NOTE: Naive bootstrap (not sequence-level), CIs may be anti-conservative
+
+3. **No arbitrary thresholds**:
+   - Don't use "10% better" rules
+   - Interpret based on whether CI excludes zero
+
+4. **Random baseline comparison**:
+   - Real signal must be substantially stronger than random
+   - At minimum +0.05 better (not just statistically significant)
 
 ### Expected Outcomes
 
