@@ -78,22 +78,28 @@ def extract_kv_states(model, tokenizer, texts, max_length=512):
             # Forward pass with output_attentions=True
             outputs = model(**inputs, output_attentions=True, use_cache=True)
 
-            # Extract KV cache from past_key_values
-            # Format: tuple of (key, value) per layer
-            # Shape: [batch, num_heads, seq_len, head_dim]
+            # Extract KV cache and attentions
             past_kv = outputs.past_key_values
+            attentions = outputs.attentions
 
-            # Skip if no cache was generated
+            # Skip if no cache or attentions were generated
             if past_kv is None or len(past_kv) == 0:
                 continue
+            if attentions is None or len(attentions) == 0:
+                continue
 
-            # Store keys and values
-            layer_keys = [kv[0].cpu() for kv in past_kv]  # List of keys per layer
-            layer_values = [kv[1].cpu() for kv in past_kv]  # List of values per layer
+            # Ensure they have the same number of layers
+            if len(past_kv) != len(attentions):
+                continue
+
+            # Store keys, values, and attentions
+            layer_keys = [kv[0].cpu() for kv in past_kv]
+            layer_values = [kv[1].cpu() for kv in past_kv]
+            layer_attentions = [attn.cpu() for attn in attentions]
 
             all_keys.append(layer_keys)
             all_values.append(layer_values)
-            all_attention.append([attn.cpu() for attn in outputs.attentions])
+            all_attention.append(layer_attentions)
 
     return {
         'keys': all_keys,
@@ -268,47 +274,24 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
     print(f"Analyzing Layer {layer_idx}")
     print(f"{'='*80}")
 
-    # Debug: Check structure
     if len(kv_states['keys']) == 0:
         raise ValueError("No KV states extracted! Check if texts are valid.")
 
-    num_samples = len(kv_states['keys'])
+    # Validate layer index
+    num_layers = len(kv_states['keys'][0])
+    if layer_idx >= num_layers:
+        raise ValueError(f"Layer {layer_idx} invalid. Model has {num_layers} layers (0-{num_layers-1})")
 
-    # Check ALL samples to find min layers (some samples might have fewer layers)
-    layer_counts = [len(sample) for sample in kv_states['keys']]
-    min_layers = min(layer_counts) if layer_counts else 0
-    max_layers = max(layer_counts) if layer_counts else 0
-
-    print(f"\nExtracted KV states:")
-    print(f"  Samples: {num_samples}")
-    print(f"  Layers per sample: {min_layers} (min) - {max_layers} (max)")
-
-    # Check if layer_idx is valid for ALL samples
-    if layer_idx >= min_layers:
-        raise ValueError(
-            f"Layer {layer_idx} doesn't exist in all samples! "
-            f"Minimum layers: {min_layers} (valid: 0-{min_layers-1})"
-        )
-
-    # Extract keys and attention for this layer (only from samples that have it)
-    keys = []
-    attentions = []
-
-    for i, sample in enumerate(kv_states['keys']):
-        if len(sample) > layer_idx:
-            keys.append(sample[layer_idx])
-            attentions.append(kv_states['attention_weights'][i][layer_idx])
-
-    print(f"  Valid samples for layer {layer_idx}: {len(keys)}/{num_samples}")
+    # Extract keys and attention for this layer
+    keys = [sample[layer_idx] for sample in kv_states['keys']]
+    attentions = [sample[layer_idx] for sample in kv_states['attention_weights']]
 
     # Try GPU version first, fallback to CPU
     if use_gpu and torch.cuda.is_available():
         try:
             euclidean_dists, cosine_sims, padic_valuations, attention_sims = \
                 analyze_distance_correlations_gpu(keys, attentions, num_pairs)
-        except Exception as e:
-            print(f"  GPU version failed: {e}")
-            print(f"  Falling back to CPU version...")
+        except Exception:
             euclidean_dists, cosine_sims, padic_valuations, attention_sims = \
                 analyze_distance_correlations_cpu(keys, attentions, num_pairs)
     else:
@@ -321,12 +304,10 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
     padic_valuations = np.array(padic_valuations)
     attention_sims = np.array(attention_sims)
 
-    print(f"\n  Computed {len(euclidean_dists)} pair distances")
-
     # Compute correlations
     print(f"\n{'='*80}")
     print("CORRELATION WITH ATTENTION SIMILARITY")
-    print(f"{'='*80}")
+    print('='*80)
 
     # Euclidean distance vs attention (expect negative correlation)
     euc_corr, euc_p = pearsonr(-euclidean_dists, attention_sims)
@@ -339,7 +320,6 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
     print(f"  Pearson r = {cos_corr:.4f}, p-value = {cos_p:.6f}")
 
     # P-adic valuation vs attention (expect positive correlation if structure exists)
-    # Higher valuation = more shared binary structure = should predict similar attention
     padic_corr, padic_p = pearsonr(padic_valuations, attention_sims)
     print(f"\nP-adic valuation v_2(K_i - K_j) vs Attention:")
     print(f"  Pearson r = {padic_corr:.4f}, p-value = {padic_p:.6f}")
@@ -347,17 +327,17 @@ def analyze_distance_correlations(kv_states, layer_idx=6, num_pairs=500, use_gpu
     # Summary
     print(f"\n{'='*80}")
     print("SUMMARY")
-    print(f"{'='*80}")
+    print('='*80)
 
-    if padic_corr > max(euc_corr, cos_corr) * 1.1:  # 10% stronger
-        print(f"✅ P-ADIC STRUCTURE DETECTED!")
+    if padic_corr > max(euc_corr, cos_corr) * 1.1:
+        print("✅ P-ADIC STRUCTURE DETECTED!")
         print(f"   P-adic correlation ({padic_corr:.4f}) is stronger than Euclidean ({euc_corr:.4f})")
-        print(f"   This suggests KV cache has exploitable ultrametric structure")
+        print("   This suggests KV cache has exploitable ultrametric structure")
     else:
-        print(f"❌ NO CLEAR P-ADIC ADVANTAGE")
+        print("❌ NO CLEAR P-ADIC ADVANTAGE")
         print(f"   P-adic correlation ({padic_corr:.4f}) not significantly better than baselines")
         print(f"   Euclidean: {euc_corr:.4f}, Cosine: {cos_corr:.4f}")
-        print(f"   Consider abandoning p-adic KV compression")
+        print("   Consider abandoning p-adic KV compression")
 
     return {
         'euclidean_corr': euc_corr,
@@ -426,10 +406,7 @@ def main():
         device_map="auto",
     )
     tokenizer = AutoTokenizer.from_pretrained(f"EleutherAI/{args.model}", cache_dir=args.cache_dir)
-
-    # Print model info
-    num_params = sum(p.numel() for p in model.parameters()) / 1e9
-    print(f"✓ Model loaded: {num_params:.2f}B params")
+    print("✓ Model loaded")
 
     # Load dataset
     print(f"\nLoading dataset: {dataset_path}...")
